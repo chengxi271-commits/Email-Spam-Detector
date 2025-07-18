@@ -1,0 +1,30 @@
+# 忽略Python的缓存文件
+__pycache__/
+*.pyc
+
+# 忽略Conda环境相关（虽然环境不在项目内，但加上是好习惯）
+envs/
+conda-meta/
+
+# 忽略我们手动创建的缓存文件夹
+hf_cache/
+install_cache/
+
+# 忽略所有数据文件！
+data/
+
+# 忽略所有模型文件！
+local_models/
+saved_models/
+
+# 忽略训练过程中的输出和日志
+results/
+results_chinesebert/
+logs/
+logs_chinesebert/
+gunicorn.log
+evaluation_report.json
+evaluation_report_final.json
+
+# 忽略VS Code的配置文件
+.vscode/

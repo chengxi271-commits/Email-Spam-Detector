@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模型效果对比分析器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <div class="main-container">
+        <header class="app-header">
+            <h1>模型效果对比分析器</h1>
+            <p class="subtitle">标准BERT vs. 字形拼音增强BERT</p>
+        </header>
+
+        <main class="content-view" id="main-content">
+            <div id="welcome-message">
+                <p>在下方输入文本进行单条分析，或点击“📊”按钮查看已生成的完整评测报告。</p>
+            </div>
+            <div id="result-container"></div>
+        </main>
+
+        <footer class="input-area">
+            <button id="show-report-button" title="展示已生成的完整评测报告">📊 显示报告</button>
+            <textarea id="text-input" placeholder="在这里输入要分析的文本..." rows="1"></textarea>
+            <button id="submit-button" title="分析 (Ctrl+Enter)">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                    <path
+                        d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" />
+                </svg>
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // 获取元素
+            const submitButton = document.getElementById('submit-button');
+            const showReportButton = document.getElementById('show-report-button');
+            const textInput = document.getElementById('text-input');
+            const resultContainer = document.getElementById('result-container');
+            const welcomeMessage = document.getElementById('welcome-message');
+
+            // 单条预测逻辑
+            const handleSingleSubmit = function () {
+                const text = textInput.value;
+                if (!text.trim()) return;
+
+                welcomeMessage.style.display = 'none';
+                resultContainer.innerHTML = '<p class="loading">正在请求两个模型进行分析...</p>';
+                textInput.value = '';
+
+                fetch('/predict_comparison', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        let resultHTML = `
+                        <div class="comparison-grid">
+                            <div class="result-card">
+                                <h3>标准 BERT</h3>
+                                <div class="verdict ${data.model_a_result.is_spam ? 'spam' : 'ham'}">${data.model_a_result.is_spam ? '判定为: 垃圾邮件' : '判定为: 正常邮件'}</div>
+                                <p>置信度: <strong>${data.model_a_result.is_spam ? data.model_a_result.confidence.spam : data.model_a_result.confidence.ham}</strong></p>
+                            </div>
+                            <div class="result-card">
+                                <h3>增强版 ChineseBERT</h3>
+                                <div class="verdict ${data.model_b_result.is_spam ? 'spam' : 'ham'}">${data.model_b_result.is_spam ? '判定为: 垃圾邮件' : '判定为: 正常邮件'}</div>
+                                <p>置信度: <strong>${data.model_b_result.is_spam ? data.model_b_result.confidence.spam : data.model_b_result.confidence.ham}</strong></p>
+                            </div>
+                        </div>
+                    `;
+                        resultContainer.innerHTML = resultHTML;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        resultContainer.innerHTML = '<p class="error">分析失败，请检查后端服务是否正常。</p>';
+                    });
+            };
+
+            // 展示完整评测报告的逻辑
+            const showFullReport = async function () {
+                welcomeMessage.style.display = 'none';
+                resultContainer.innerHTML = '<p class="loading">正在加载评测报告...</p>';
+
+                try {
+                    const response = await fetch('/get_evaluation_report');
+                    if (!response.ok) {
+                        const errData = await response.json();
+                        throw new Error(errData.error || `服务器响应错误: ${response.status}`);
+                    }
+                    const report = await response.json();
+
+                    const buildReportCard = (reportData) => {
+                        const cm = reportData.confusion_matrix;
+                        return `
+                            <div class="evaluation-report">
+                                <h3>${reportData.model_name}</h3>
+                                <div class="metrics-grid">
+                                    <div class="metric-card"><h4>准确率</h4><p>${reportData.accuracy}</p></div>
+                                    <div class="metric-card"><h4>精确率</h4><p>${reportData.precision}</p></div>
+                                    <div class="metric-card"><h4>召回率</h4><p>${reportData.recall}</p></div>
+                                    <div class="metric-card"><h4>F1分数</h4><p>${reportData.f1_score}</p></div>
+                                </div>
+                                <h4>混淆矩阵 (共 ${reportData.total_samples} 条)</h4>
+                                <table class="confusion-matrix">
+                                    <tr><td></td><td>预测为正常</td><td>预测为垃圾</td></tr>
+                                    <tr><td>实际为正常</td><td>${cm.true_negatives} (TN)</td><td>${cm.false_positives} (FP)</td></tr>
+                                    <tr><td>实际为垃圾</td><td>${cm.false_negatives} (FN)</td><td>${cm.true_positives} (TP)</td></tr>
+                                </table>
+                            </div>
+                        `;
+                    };
+
+                    let reportHTML = `
+                        <h2>测试集完整评估报告</h2>
+                        <div class="comparison-grid">
+                            ${buildReportCard(report.model_a_report)}
+                            ${buildReportCard(report.model_b_report)}
+                        </div>
+                    `;
+                    resultContainer.innerHTML = reportHTML;
+                } catch (error) {
+                    console.error("Failed to show report:", error);
+                    resultContainer.innerHTML = `<p class="error">加载报告失败: ${error.message}</p>`;
+                }
+            };
+
+            // 绑定事件
+            submitButton.addEventListener('click', handleSingleSubmit);
+            showReportButton.addEventListener('click', showFullReport);
+
+            textInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                    event.preventDefault();
+                    handleSingleSubmit();
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
