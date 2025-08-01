@@ -28,3 +28,5 @@ evaluation_report_final.json
 
 # 忽略VS Code的配置文件
 .vscode/
+
+results_few_shot/
