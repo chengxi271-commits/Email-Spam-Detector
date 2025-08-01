@@ -1,0 +1,32 @@
+{
+    "model_name": "50-shot Fine-Tuned Model",
+    "model_path": "./saved_models/trec06c_classifier_50_shot",
+    "clean_set_report": {
+        "dataset_name": "test.csv",
+        "total_samples": 6429,
+        "accuracy": "0.9154",
+        "precision": "0.9239",
+        "recall": "0.9504",
+        "f1_score": "0.9369",
+        "confusion_matrix": {
+            "true_positives": 4042,
+            "false_positives": 333,
+            "true_negatives": 1843,
+            "false_negatives": 211
+        }
+    },
+    "confused_set_report": {
+        "dataset_name": "test_confused.csv",
+        "total_samples": 6429,
+        "accuracy": "0.9034",
+        "precision": "0.8914",
+        "recall": "0.9725",
+        "f1_score": "0.9302",
+        "confusion_matrix": {
+            "true_positives": 4136,
+            "false_positives": 504,
+            "true_negatives": 1672,
+            "false_negatives": 117
+        }
+    }
+}

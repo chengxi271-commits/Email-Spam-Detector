@@ -1,98 +1,141 @@
-# run_evaluation.py (Final, Single-GPU, Correct Version)
+# run_evaluation.py (最终对比评测版)
 
 import torch
 import pandas as pd
 import logging
 import json
 import os
-from transformers import BertForSequenceClassification, BertTokenizer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+)
+from torch.utils.data import DataLoader, SequentialSampler, TensorDataset
 from tqdm import tqdm
 
-from char_processor import enhance_text
-
 # --- 配置 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-# --- 路径定义 ---
-MODEL_A_PATH = './saved_models/trec06c_classifier_v2'
-MODEL_B_PATH = './saved_models/chinese_bert_enhanced_v1'
-TEST_DATA_PATH = './data/test.csv'
-REPORT_SAVE_PATH = './evaluation_report_final.json'
+# 核心配置：指定要评估的那个“少样本模型”
+NUM_SHOTS = 50
+MODEL_NAME_OR_PATH = f"./saved_models/trec06c_classifier_{NUM_SHOTS}_shot"
 
-# --- 定义设备 ---
+# 测试集路径
+CLEAN_TEST_PATH = "./data/test.csv"
+CONFUSED_TEST_PATH = "./data/test_confused.csv"
+
+# 最终对比报告的保存路径
+REPORT_SAVE_PATH = f"./evaluation_report_comparison_{NUM_SHOTS}_shot.json"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# --- 计算指标的函数 (和之前一样) ---
-def calculate_metrics(true_labels, predicted_labels, model_name):
-    logging.info(f"Calculating metrics for {model_name}...")
-    accuracy = accuracy_score(true_labels, predicted_labels)
-    precision = precision_score(true_labels, predicted_labels, zero_division=0)
-    recall = recall_score(true_labels, predicted_labels, zero_division=0)
-    f1 = f1_score(true_labels, predicted_labels, zero_division=0)
-    tn, fp, fn, tp = confusion_matrix(true_labels, predicted_labels).ravel()
-    return {
-        "model_name": model_name, "total_samples": len(true_labels),
-        "accuracy": f"{accuracy:.4f}", "precision": f"{precision:.4f}",
-        "recall": f"{recall:.4f}", "f1_score": f"{f1:.4f}",
-        "confusion_matrix": {
-            "true_positives": int(tp), "false_positives": int(fp),
-            "true_negatives": int(tn), "false_negatives": int(fn)
-        }
-    }
 
-# --- 核心评测函数 (单GPU版) ---
-def evaluate_model(model, tokenizer, texts):
-    model.eval()
-    all_predictions = []
-    batch_size = 64
-    
+def evaluate_on_dataset(model, tokenizer, file_path, description="Evaluating"):
+    """
+    在一个指定的数据集上评测模型性能的通用函数。
+    返回一个包含各项指标的字典。
+    """
+    logging.info(f"Starting evaluation on dataset: {file_path}")
+
+    # 1. 加载并准备数据
+    try:
+        df_test = pd.read_csv(file_path).dropna()
+        texts = df_test["text"].astype(str).tolist()
+        true_labels = df_test["label"].tolist()
+    except FileNotFoundError:
+        logging.error(f"Dataset not found at {file_path}. Please generate it first.")
+        return None
+
+    logging.info("Tokenizing data...")
+    inputs = tokenizer(
+        texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
+    )
+
+    # 2. 批量预测
+    all_preds = []
+    dataset = TensorDataset(inputs["input_ids"], inputs["attention_mask"])
+    sampler = SequentialSampler(dataset)
+    dataloader = DataLoader(dataset, sampler=sampler, batch_size=64)
+
     with torch.no_grad():
-        for i in tqdm(range(0, len(texts), batch_size), desc=f"Evaluating on {DEVICE}"):
-            batch_texts = texts[i:i+batch_size]
-            inputs = tokenizer(batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=512).to(DEVICE)
-            outputs = model(**inputs)
-            preds = torch.argmax(outputs.logits, dim=-1)
-            all_predictions.extend(preds.cpu().numpy())
-    return all_predictions
+        for batch in tqdm(dataloader, desc=description):
+            batch_input_ids, batch_attention_mask = [b.to(DEVICE) for b in batch]
+            outputs = model(
+                input_ids=batch_input_ids, attention_mask=batch_attention_mask
+            )
+            all_preds.extend(torch.argmax(outputs.logits, dim=1).cpu().numpy())
+
+    # 3. 计算指标
+    tn, fp, fn, tp = confusion_matrix(true_labels, all_preds).ravel()
+    report = {
+        "dataset_name": os.path.basename(file_path),
+        "total_samples": len(true_labels),
+        "accuracy": f"{accuracy_score(true_labels, all_preds):.4f}",
+        "precision": f"{precision_score(true_labels, all_preds, zero_division=0):.4f}",
+        "recall": f"{recall_score(true_labels, all_preds, zero_division=0):.4f}",
+        "f1_score": f"{f1_score(true_labels, all_preds, zero_division=0):.4f}",
+        "confusion_matrix": {
+            "true_positives": int(tp),
+            "false_positives": int(fp),
+            "true_negatives": int(tn),
+            "false_negatives": int(fn),
+        },
+    }
+    return report
+
 
 def main():
-    logging.info("Starting SINGLE-GPU evaluation...")
-    
-    # 1. 加载测试数据
-    df_test = pd.read_csv(TEST_DATA_PATH).dropna()
-    true_labels = df_test['label'].tolist()
-    original_texts = df_test['text'].astype(str).tolist()
+    logging.info(f"Starting comparative evaluation for model: {MODEL_NAME_OR_PATH}...")
 
-    # 2. 增强文本
-    logging.info("Enhancing test texts for ChineseBERT model...")
-    tqdm.pandas(desc="Enhancing test set")
-    enhanced_texts = df_test['text'].astype(str).progress_apply(enhance_text).tolist()
+    # 1. 加载我们训练好的模型和分词器
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME_OR_PATH)
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME_OR_PATH)
+        model.to(DEVICE)
+        model.eval()
+    except OSError:
+        logging.error(
+            f"Model not found at {MODEL_NAME_OR_PATH}. Please run train_trec06c.py first."
+        )
+        return
 
-    # 3. 评估模型A
-    logging.info(f"Loading Model A (Standard BERT)...")
-    model_a = BertForSequenceClassification.from_pretrained(MODEL_A_PATH).to(DEVICE)
-    tokenizer_a = BertTokenizer.from_pretrained(MODEL_A_PATH)
-    predictions_a = evaluate_model(model_a, tokenizer_a, original_texts)
-    report_a = calculate_metrics(true_labels, predictions_a, "Standard BERT")
+    # 2. 在“干净测试集”上进行评测
+    clean_report = evaluate_on_dataset(
+        model, tokenizer, CLEAN_TEST_PATH, "Evaluating on Clean Set"
+    )
 
-    # 4. 评估模型B
-    logging.info(f"Loading Model B (ChineseBERT Enhanced)...")
-    model_b = BertForSequenceClassification.from_pretrained(MODEL_B_PATH).to(DEVICE)
-    tokenizer_b = BertTokenizer.from_pretrained(MODEL_B_PATH)
-    predictions_b = evaluate_model(model_b, tokenizer_b, enhanced_texts)
-    report_b = calculate_metrics(true_labels, predictions_b, "ChineseBERT Enhanced")
-    
-    # 5. 整合并保存报告
-    final_report = {"model_a_report": report_a, "model_b_report": report_b}
+    # 3. 在“混淆测试集”上进行评测
+    confused_report = evaluate_on_dataset(
+        model, tokenizer, CONFUSED_TEST_PATH, "Evaluating on Confused Set"
+    )
+
+    if not clean_report or not confused_report:
+        logging.error("Evaluation could not be completed for one or both datasets.")
+        return
+
+    # 4. 整合报告
+    final_comparison_report = {
+        "model_name": f"{NUM_SHOTS}-shot Fine-Tuned Model",
+        "model_path": MODEL_NAME_OR_PATH,
+        "clean_set_report": clean_report,
+        "confused_set_report": confused_report,
+    }
+
+    # 5. 保存并打印最终的对比报告
     logging.info(f"Saving final comparison report to {REPORT_SAVE_PATH}...")
-    with open(REPORT_SAVE_PATH, 'w', encoding='utf-8') as f:
-        json.dump(final_report, f, ensure_ascii=False, indent=4)
-        
-    logging.info("Evaluation complete! Report saved.")
-    print("\n--- FINAL COMPARISON REPORT (SINGLE GPU - CORRECTED) ---")
-    print(json.dumps(final_report, indent=4, ensure_ascii=False))
-    print("---------------------------------------------------------")
+    with open(REPORT_SAVE_PATH, "w", encoding="utf-8") as f:
+        json.dump(final_comparison_report, f, ensure_ascii=False, indent=4)
 
-if __name__ == '__main__':
+    print("\n========================================================")
+    print("           FINAL COMPARISON REPORT")
+    print("========================================================")
+    print(json.dumps(final_comparison_report, indent=4, ensure_ascii=False))
+    print("========================================================")
+
+
+if __name__ == "__main__":
     main()
