@@ -25,16 +25,17 @@
 
 1. 环境设置
 
-# 创建并激活Conda环境
+创建并激活Conda环境
 
 conda create --name bert_exp python=3.10 -y
 conda activate bert_exp
 
-# 安装所有依赖
+安装所有依赖
 
 pip install torch transformers scikit-learn pandas tqdm
 
 2. 数据与模型准备
+3. 
 预训练模型: 将 hfl/chinese-bert-wwm-ext 手动下载并放置于 ./local_models/hfl-bert-wwm/ 目录下。
 
 数据集: 将 trec06c 原始数据集解压，确保其 data 和 full/index 位于 ./data/trec06c/ 路径下。
@@ -43,20 +44,20 @@ pip install torch transformers scikit-learn pandas tqdm
 
 3. 完整实验流程
 
-# 第一步 (仅需一次): 运行数据预处理，生成train/validation/test三个CSV文件
+第一步 (仅需一次): 运行数据预处理，生成train/validation/test三个CSV文件
 
 python preprocess_trec06c.py
 
-# 第二步: 训练少样本基线模型 (可在脚本内调整NUM_SHOTS)
+第二步: 训练少样本基线模型 (可在脚本内调整NUM_SHOTS)
 
 python train_trec06c.py
 
-# 第三步 (可选，仅需一次): 生成用于压力测试的混淆数据集
+第三步 (可选，仅需一次): 生成用于压力测试的混淆数据集
 
 python create_confused_set.py
 
-# 第四步: 运行对比评估，检验模型在干净和混淆数据集上的表现
+第四步: 运行对比评估，检验模型在干净和混淆数据集上的表现
 
-# (可在脚本内调整NUM_SHOTS以评估对应的模型)
+(可在脚本内调整NUM_SHOTS以评估对应的模型)
 
 python run_evaluation.py
