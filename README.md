@@ -35,7 +35,7 @@ conda activate bert_exp
 pip install torch transformers scikit-learn pandas tqdm
 
 2. 数据与模型准备
-3. 
+
 预训练模型: 将 hfl/chinese-bert-wwm-ext 手动下载并放置于 ./local_models/hfl-bert-wwm/ 目录下。
 
 数据集: 将 trec06c 原始数据集解压，确保其 data 和 full/index 位于 ./data/trec06c/ 路径下。
